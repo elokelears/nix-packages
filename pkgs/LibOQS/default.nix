@@ -1,43 +1,45 @@
 {
-  lib,
   stdenv,
-  fetchFromGitHub,
-  cmake,
+  fetchurl,
+  electron,
+  lib,
+  makeWrapper,
   ...
 } @ args:
+################################################################################
+# Mostly based on bilibili-bin package from AUR:
+# https://aur.archlinux.org/packages/bilibili-bin
+################################################################################
 stdenv.mkDerivation rec {
-  # 指定包名和版本
-  pname = "liboqs";
-  version = "0.7.1";
-
-  # 从 GitHub 下载源代码
-  src = fetchFromGitHub {
-    owner = "open-quantum-safe";
-    repo = "liboqs";
-    # 对应的 commit 或者 tag，注意 fetchFromGitHub 不能跟随 branch！
-    rev = "0.7.1";
-    # 下载 git submodules，绝大部分软件包没有这个
-    fetchSubmodules = false;
-    # 这里的 SHA256 校验码不会算怎么办？先注释掉，然后构建这个软件包，Nix 会报错，并提示你正确的校验码
-    sha256 = "sha256-m20M4+3zsH40hTpMJG9cyIjXp0xcCUBS+cCiRVLXFqM=";
+  pname = "bilibili";
+  version = "1.2.1-1";
+  src = fetchurl {
+    url = "https://github.com/msojocs/bilibili-linux/releases/download/v1.2.1-1/io.github.msojocs.bilibili_1.2.1-1_amd64.deb";
+    sha256 = "sha256-t/igezm0ipkOkKION8qTYGK9f6qI3c4iPuS/wWrMywQ=";
   };
 
-  # 并行编译，大幅加快打包速度，默认是启用的。对于极少数并行编译会失败的软件包，才需要禁用。
-  enableParallelBuilding = true;
-  # 如果基于 CMake 的软件包在打包时出现了奇怪的错误，可以尝试启用此选项
-  # 此选项禁用了对 CMake 软件包的一些自动修正
-  dontFixCmake = true;
+  # 解压 DEB 包
+  unpackPhase = ''
+    ar x ${src}
+    tar xf data.tar.xz
+  '';
 
-  # 将 CMake 加入编译环境，用来生成 Makefile
-  nativeBuildInputs = [cmake];
+  # makeWrapper 可以自动生成一个调用其它命令的命令（也就是 wrapper），并且可以在原命令上修改参数、环境变量等
+  buildInputs = [makeWrapper];
 
-  # 传给 CMake 的配置参数，控制 liboqs 的功能
-  cmakeFlags = [
-    "-DBUILD_SHARED_LIBS=ON"
-    "-DOQS_BUILD_ONLY_LIB=1"
-    "-DOQS_USE_OPENSSL=OFF"
-    "-DOQS_DIST_BUILD=ON"
-  ];
+  installPhase = ''
+    mkdir -p $out/bin
 
-  # stdenv.mkDerivation 自动帮你完成其余的步骤
+    # 替换菜单项目（desktop 文件）中的路径
+    cp -r usr/share $out/share
+    sed -i "s|Exec=.*|Exec=$out/bin/bilibili|" $out/share/applications/*.desktop
+
+    # 复制出客户端的 Javascript 部分，其它的不要了
+    cp -r opt/apps/io.github.msojocs.bilibili/files/bin/app $out/opt
+
+    # 生成 bilibili 命令，运行这个命令时会调用 electron 加载客户端的 Javascript 包（$out/opt/app.asar）
+    makeWrapper ${electron}/bin/electron $out/bin/bilibili \
+      --argv0 "bilibili" \
+      --add-flags "$out/opt/app.asar"
+  '';
 }
